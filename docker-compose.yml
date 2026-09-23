@@ -7,6 +7,10 @@ services:
 
   api:
     build: .
+    # Local dev keeps hot-reload via ts-node-dev against the bind-mounted source;
+    # the image's own CMD (used by Render) runs the compiled build instead — see
+    # Dockerfile.
+    command: npx ts-node-dev --respawn src/server.ts
     depends_on:
       - mongo
     ports:
