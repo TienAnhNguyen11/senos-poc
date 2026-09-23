@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SenOS Chat</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css" />
+  <style>
+    #history { max-height: 60vh; overflow-y: auto; }
+    .msg-user { text-align: right; }
+    .msg-user > span { background: var(--pico-primary-background); color: var(--pico-primary-inverse); border-radius: 8px; padding: 0.5rem 0.75rem; display: inline-block; }
+    .msg-assistant > span { background: var(--pico-card-background-color); border-radius: 8px; padding: 0.5rem 0.75rem; display: inline-block; }
+    .search-tag { font-size: 0.75rem; opacity: 0.7; }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <nav>
+      <ul><li><strong>SenOS Chat</strong></li></ul>
+      <ul>
+        <li id="who"></li>
+        <li><a href="admin.html">Admin</a></li>
+        <li><a href="#" id="logout">Log out</a></li>
+      </ul>
+    </nav>
+
+    <article id="accept-card" hidden>
+      <h3>Set your password</h3>
+      <p id="accept-email"></p>
+      <form id="accept-form">
+        <input type="password" id="accept-password" placeholder="Choose a password" required minlength="6" />
+        <button type="submit">Join</button>
+      </form>
+      <small id="accept-error" style="color: var(--pico-del-color)"></small>
+    </article>
+
+    <article id="login-card">
+      <h3>Log in</h3>
+      <form id="login-form">
+        <input type="email" id="email" placeholder="Email" required />
+        <input type="password" id="password" placeholder="Password" required />
+        <button type="submit">Log in</button>
+      </form>
+      <small id="login-error" style="color: var(--pico-del-color)"></small>
+    </article>
+
+    <div id="chat-view" hidden>
+      <div id="usage-banner"></div>
+      <div id="history"></div>
+      <form id="send-form" class="grid">
+        <input type="text" id="content" placeholder="Ask something..." required autocomplete="off" />
+        <button type="submit">Send</button>
+      </form>
+      <small id="send-error" style="color: var(--pico-del-color)"></small>
+    </div>
+  </main>
+
+  <script>
+    const api = (path, opts = {}) => fetch('/api' + path, {
+      ...opts,
+      headers: { 'Content-Type': 'application/json', ...(opts.headers || {}), ...authHeader() },
+    }).then(async (r) => {
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw Object.assign(new Error(body.error || r.statusText), { status: r.status });
+      return body;
+    });
+
+    const authHeader = () => {
+      const token = localStorage.getItem('senos_token');
+      return token ? { Authorization: 'Bearer ' + token } : {};
+    };
+
+    const params = new URLSearchParams(location.search);
+    const inviteToken = params.get('invite');
+
+    async function boot() {
+      if (localStorage.getItem('senos_token')) return showChat();
+      if (inviteToken) return showAcceptInvite();
+      document.getElementById('login-card').hidden = false;
+    }
+
+    async function showAcceptInvite() {
+      document.getElementById('accept-card').hidden = false;
+      try {
+        const { email } = await fetch('/api/auth/invites/' + inviteToken).then((r) => r.json());
+        document.getElementById('accept-email').textContent = email;
+      } catch {
+        document.getElementById('accept-error').textContent = 'Invite not found or expired.';
+      }
+    }
+
+    document.getElementById('accept-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const password = document.getElementById('accept-password').value;
+      try {
+        const { token } = await fetch('/api/auth/invites/' + inviteToken + '/accept', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password }),
+        }).then(async (r) => {
+          const body = await r.json();
+          if (!r.ok) throw new Error(body.error);
+          return body;
+        });
+        localStorage.setItem('senos_token', token);
+        history.replaceState({}, '', 'chat.html');
+        showChat();
+      } catch (err) {
+        document.getElementById('accept-error').textContent = err.message;
+      }
+    });
+
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      try {
+        const { token } = await api('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+        localStorage.setItem('senos_token', token);
+        showChat();
+      } catch (err) {
+        document.getElementById('login-error').textContent = err.message;
+      }
+    });
+
+    document.getElementById('logout').addEventListener('click', (e) => {
+      e.preventDefault();
+      localStorage.removeItem('senos_token');
+      location.reload();
+    });
+
+    async function showChat() {
+      document.getElementById('login-card').hidden = true;
+      document.getElementById('accept-card').hidden = true;
+      document.getElementById('chat-view').hidden = false;
+      await Promise.all([loadHistory(), loadUsage()]);
+    }
+
+    function renderMessage(m) {
+      const searchTag = m.usedWebSearch ? ' <span class="search-tag">🔎 used web search</span>' : '';
+      return `<p class="msg-${m.role}"><span>${escapeHtml(m.content)}</span>${m.role === 'assistant' ? searchTag : ''}</p>`;
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    function appendEmptyAssistantMessage() {
+      const p = document.createElement('p');
+      p.className = 'msg-assistant';
+      p.innerHTML = '<span></span>';
+      document.getElementById('history').appendChild(p);
+      return p.querySelector('span');
+    }
+
+    // Reads the NDJSON stream from POST /api/chat/messages (see chat.routes.ts):
+    // one {"type":"delta","text":...} line per token chunk, then one
+    // {"type":"done", reply, usedWebSearch, warn}. onDelta is called as text
+    // arrives so the UI can render tokens as they're generated.
+    async function streamChat(content, onDelta) {
+      const res = await fetch('/api/chat/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeader() },
+        body: JSON.stringify({ content }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw Object.assign(new Error(body.error || res.statusText), { status: res.status });
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let done_ = null;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buffer.indexOf('\n')) >= 0) {
+          const line = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 1);
+          if (!line) continue;
+          const evt = JSON.parse(line);
+          if (evt.type === 'delta') onDelta(evt.text);
+          else if (evt.type === 'done') done_ = evt;
+          else if (evt.type === 'error') throw new Error(evt.error);
+        }
+      }
+      return done_;
+    }
+
+    async function loadHistory() {
+      const messages = await api('/chat/messages');
+      document.getElementById('history').innerHTML = messages.map(renderMessage).join('');
+      document.getElementById('history').scrollTop = 1e9;
+    }
+
+    async function loadUsage() {
+      const usage = await api('/usage/me');
+      document.getElementById('who').textContent = `${usage.count} messages this month`;
+    }
+
+    document.getElementById('send-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const input = document.getElementById('content');
+      const content = input.value;
+      const errorEl = document.getElementById('send-error');
+      errorEl.textContent = '';
+      document.getElementById('history').insertAdjacentHTML('beforeend', renderMessage({ role: 'user', content }));
+      input.value = '';
+      const history = document.getElementById('history');
+      let assistantSpan = null;
+      try {
+        const result = await streamChat(content, (delta) => {
+          if (!assistantSpan) assistantSpan = appendEmptyAssistantMessage();
+          assistantSpan.textContent += delta;
+          history.scrollTop = 1e9;
+        });
+        if (result?.usedWebSearch && assistantSpan) {
+          assistantSpan.insertAdjacentHTML('afterend', ' <span class="search-tag">🔎 used web search</span>');
+        }
+        document.getElementById('usage-banner').innerHTML = result?.warn
+          ? '<article style="background: var(--pico-mark-background-color)">⚠️ Your department is near its monthly budget (80%+).</article>'
+          : '';
+        loadUsage();
+      } catch (err) {
+        if (err.status === 429) {
+          document.getElementById('usage-banner').innerHTML =
+            '<article style="background: var(--pico-del-color); color: white">🚫 Department budget used up for this month — chat blocked.</article>';
+        } else {
+          errorEl.textContent = err.message;
+        }
+      }
+    });
+
+    boot();
+  </script>
+</body>
+</html>

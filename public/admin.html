@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SenOS Admin</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css" />
+</head>
+<body>
+  <main class="container">
+    <nav>
+      <ul><li><strong>SenOS Admin</strong></li></ul>
+      <ul>
+        <li id="who"></li>
+        <li><a href="chat.html">Go to chat</a></li>
+        <li><a href="#" id="logout">Log out</a></li>
+      </ul>
+    </nav>
+
+    <article id="login-card">
+      <h3>Admin login</h3>
+      <form id="login-form">
+        <input type="email" id="email" placeholder="Email" required />
+        <input type="password" id="password" placeholder="Password" required />
+        <button type="submit">Log in</button>
+      </form>
+      <small id="login-error" style="color: var(--pico-del-color)"></small>
+    </article>
+
+    <div id="dashboard" hidden>
+      <section>
+        <h3>Tenant settings</h3>
+        <div class="grid">
+          <label>
+            Monthly budget (requests)
+            <select id="tenant-budget">
+              <option value="5000">5,000</option>
+              <option value="10000">10,000</option>
+              <option value="20000">20,000</option>
+            </select>
+          </label>
+          <label>
+            <input type="checkbox" id="web-search-toggle" />
+            Web search enabled
+          </label>
+        </div>
+        <small id="tenant-error" style="color: var(--pico-del-color)"></small>
+      </section>
+
+      <section>
+        <h3>Departments</h3>
+        <table id="departments-table">
+          <thead><tr><th>Name</th><th>Budget/mo</th><th>Used this month</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <form id="dept-form" class="grid">
+          <input type="text" id="dept-name" placeholder="Department name" required />
+          <input type="number" id="dept-budget" placeholder="Monthly budget (requests)" required min="1" />
+          <button type="submit">Add department</button>
+        </form>
+      </section>
+
+      <section>
+        <h3>Users</h3>
+        <table id="users-table">
+          <thead><tr><th>Email</th><th>Role</th><th>Department</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </section>
+
+      <section>
+        <h3>Invite a user</h3>
+        <form id="invite-form" class="grid">
+          <input type="email" id="invite-email" placeholder="Email" required />
+          <select id="invite-department" required></select>
+          <button type="submit">Create invite</button>
+        </form>
+        <div id="invite-result"></div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const api = (path, opts = {}) => fetch('/api' + path, {
+      ...opts,
+      headers: { 'Content-Type': 'application/json', ...(opts.headers || {}), ...authHeader() },
+    }).then(async (r) => {
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || r.statusText);
+      return body;
+    });
+
+    const authHeader = () => {
+      const token = localStorage.getItem('senos_token');
+      return token ? { Authorization: 'Bearer ' + token } : {};
+    };
+
+    function showDashboard() {
+      document.getElementById('login-card').hidden = true;
+      document.getElementById('dashboard').hidden = false;
+      document.getElementById('who').textContent = localStorage.getItem('senos_email') || '';
+      loadAll();
+    }
+
+    if (localStorage.getItem('senos_token')) showDashboard();
+
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      try {
+        const { token } = await api('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+        localStorage.setItem('senos_token', token);
+        localStorage.setItem('senos_email', email);
+        showDashboard();
+      } catch (err) {
+        document.getElementById('login-error').textContent = err.message;
+      }
+    });
+
+    document.getElementById('logout').addEventListener('click', (e) => {
+      e.preventDefault();
+      localStorage.removeItem('senos_token');
+      location.reload();
+    });
+
+    let departmentsCache = [];
+
+    async function loadAll() {
+      await Promise.all([loadDepartments(), loadUsers()]);
+    }
+
+    async function loadDepartments() {
+      departmentsCache = await api('/admin/departments');
+      const tbody = document.querySelector('#departments-table tbody');
+      tbody.innerHTML = departmentsCache
+        .map((d) => `<tr><td>${d.name}</td><td>${d.monthlyBudget}</td><td>${d.usage.count}</td></tr>`)
+        .join('');
+
+      const deptSelect = document.getElementById('invite-department');
+      deptSelect.innerHTML = departmentsCache
+        .map((d) => `<option value="${d._id}">${d.name}</option>`)
+        .join('');
+    }
+
+    async function loadUsers() {
+      const users = await api('/admin/users');
+      const tbody = document.querySelector('#users-table tbody');
+      tbody.innerHTML = users
+        .map((u) => {
+          const dept = departmentsCache.find((d) => d._id === u.departmentId);
+          return `<tr><td>${u.email}</td><td>${u.role}</td><td>${dept ? dept.name : '—'}</td></tr>`;
+        })
+        .join('');
+    }
+
+    document.getElementById('tenant-budget').addEventListener('change', async (e) => {
+      try {
+        await api('/admin/tenant/budget', {
+          method: 'PATCH',
+          body: JSON.stringify({ monthlyBudget: Number(e.target.value) }),
+        });
+        document.getElementById('tenant-error').textContent = '';
+      } catch (err) {
+        document.getElementById('tenant-error').textContent = err.message;
+      }
+    });
+
+    document.getElementById('web-search-toggle').addEventListener('change', async (e) => {
+      await api('/admin/tenant/web-search', {
+        method: 'PATCH',
+        body: JSON.stringify({ enabled: e.target.checked }),
+      });
+    });
+
+    document.getElementById('dept-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const name = document.getElementById('dept-name').value;
+      const monthlyBudget = Number(document.getElementById('dept-budget').value);
+      await api('/admin/departments', { method: 'POST', body: JSON.stringify({ name, monthlyBudget }) });
+      e.target.reset();
+      loadDepartments();
+    });
+
+    document.getElementById('invite-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('invite-email').value;
+      const departmentId = document.getElementById('invite-department').value;
+      const { link } = await api('/admin/invites', { method: 'POST', body: JSON.stringify({ email, departmentId }) });
+      document.getElementById('invite-result').innerHTML = `Invite link (copy &amp; send manually): <code>${link}</code>`;
+      e.target.reset();
+    });
+  </script>
+</body>
+</html>

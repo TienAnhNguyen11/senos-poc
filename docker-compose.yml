@@ -1,0 +1,25 @@
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+
+  api:
+    build: .
+    depends_on:
+      - mongo
+    ports:
+      - "3000:3000"
+    environment:
+      MONGO_URI: mongodb://mongo:27017/senos-poc
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      PLATFORM_MONTHLY_CAPACITY: ${PLATFORM_MONTHLY_CAPACITY:-100000}
+      PORT: 3000
+    volumes:
+      - .:/app
+      - /app/node_modules
+
+volumes:
+  mongo-data:
