@@ -63,7 +63,7 @@
       <section>
         <h3>Users</h3>
         <table id="users-table">
-          <thead><tr><th>Email</th><th>Role</th><th>Department</th></tr></thead>
+          <thead><tr><th>Email</th><th>Role</th><th>Department</th><th>Messages this month</th></tr></thead>
           <tbody></tbody>
         </table>
       </section>
@@ -144,12 +144,13 @@
     }
 
     async function loadUsers() {
-      const users = await api('/admin/users');
+      const [users, usage] = await Promise.all([api('/admin/users'), api('/admin/usage')]);
+      const countByUser = Object.fromEntries(usage.byUser.map((u) => [u._id, u.count]));
       const tbody = document.querySelector('#users-table tbody');
       tbody.innerHTML = users
         .map((u) => {
           const dept = departmentsCache.find((d) => d._id === u.departmentId);
-          return `<tr><td>${u.email}</td><td>${u.role}</td><td>${dept ? dept.name : '—'}</td></tr>`;
+          return `<tr><td>${u.email}</td><td>${u.role}</td><td>${dept ? dept.name : '—'}</td><td>${countByUser[u._id] ?? 0}</td></tr>`;
         })
         .join('');
     }
