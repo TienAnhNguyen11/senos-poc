@@ -1,7 +1,7 @@
-import { Types } from 'mongoose';
 import { Tenant } from '../models/Tenant';
 import { Department } from '../models/Department';
 import { UsageCounter } from '../models/UsageCounter';
+import { PlatformAllocation } from '../models/PlatformAllocation';
 import { env } from '../config/env';
 import { HttpError } from '../errors/HttpError';
 
@@ -10,16 +10,51 @@ export function currentPeriod(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
-/** Admission-control: total budget across ALL tenants must never exceed platform capacity. */
-export async function setTenantBudget(tenantId: string, newBudget: number): Promise<void> {
+/** Ensures the PlatformAllocation singleton exists, backfilled from current tenant
+ * budgets. Called once at startup (see server.ts) — matters for redeploys of an
+ * already-seeded DB, where tenants exist but this counter doc doesn't yet. */
+export async function ensurePlatformAllocationInitialized(): Promise<void> {
+  const existing = await PlatformAllocation.findById('platform');
+  if (existing) return;
   const [agg] = await Tenant.aggregate([
-    { $match: { _id: { $ne: new Types.ObjectId(tenantId) } } },
     { $group: { _id: null, sum: { $sum: '$monthlyBudget' } } },
   ]);
-  const total = (agg?.sum ?? 0) + newBudget;
-  if (total > env.PLATFORM_MONTHLY_CAPACITY) {
-    throw new HttpError(409, 'Exceeds platform capacity — contact SenOS for a custom plan');
+  await PlatformAllocation.updateOne(
+    { _id: 'platform' },
+    { $setOnInsert: { totalAllocated: agg?.sum ?? 0 } },
+    { upsert: true }
+  );
+}
+
+/** Admission-control: total budget across ALL tenants must never exceed platform
+ * capacity. Check-and-increment runs atomically on the single PlatformAllocation
+ * document — summing Tenant.monthlyBudget via aggregate and updating separately (the
+ * original version) is a TOCTOU race: two admins raising two different tenants'
+ * budgets near the cap at the same time can both read "still under cap" and both
+ * pass, pushing the real total over. Mongo's atomicity is per-document, not across
+ * an aggregate, so the check-and-increment has to happen on one document — same
+ * reasoning as checkAndIncrementBudget below. Found via self-review (mock defend),
+ * not during initial implementation — see take-home-tech-spec.md section 8a. */
+export async function setTenantBudget(tenantId: string, newBudget: number): Promise<void> {
+  const tenant = await Tenant.findById(tenantId);
+  if (!tenant) throw new HttpError(404, 'Tenant not found');
+  const delta = newBudget - tenant.monthlyBudget;
+
+  if (delta > 0) {
+    const ok = await PlatformAllocation.findOneAndUpdate(
+      { _id: 'platform', totalAllocated: { $lte: env.PLATFORM_MONTHLY_CAPACITY - delta } },
+      { $inc: { totalAllocated: delta } }
+    );
+    if (!ok) throw new HttpError(409, 'Exceeds platform capacity — contact SenOS for a custom plan');
+  } else if (delta < 0) {
+    await PlatformAllocation.updateOne({ _id: 'platform' }, { $inc: { totalAllocated: delta } });
   }
+
+  // Known gap (acceptable for a PoC): these are two separate writes, not wrapped in
+  // a Mongo transaction. A crash between them leaves PlatformAllocation.totalAllocated
+  // and the sum of Tenant.monthlyBudget out of sync. A real product would either use
+  // a transaction or treat Tenant.monthlyBudget as a cache and PlatformAllocation as
+  // the source of truth.
   await Tenant.updateOne({ _id: tenantId }, { monthlyBudget: newBudget });
 }
 
