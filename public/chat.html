@@ -43,7 +43,7 @@
     <div id="chat-view" hidden>
       <div id="usage-banner"></div>
       <div id="history"></div>
-      <form id="send-form" class="grid">
+      <form id="send-form" class="chat-input-row">
         <input type="text" id="content" placeholder="Ask something..." required autocomplete="off" />
         <button type="submit">Send</button>
       </form>
@@ -132,9 +132,29 @@
       await Promise.all([loadHistory(), loadUsage()]);
     }
 
+function formatTime(date) {
+      const diffMin = Math.round((Date.now() - date.getTime()) / 60000);
+      if (diffMin < 1) return 'just now';
+      if (diffMin < 60) return `${diffMin} min ago`;
+      const diffHr = Math.round(diffMin / 60);
+      if (diffHr < 24) return `${diffHr} hour${diffHr > 1 ? 's' : ''} ago`;
+      return date.toLocaleDateString();
+    }
+
     function renderMessage(m) {
-      const searchTag = m.usedWebSearch ? ' <span class="search-tag">🔎 used web search</span>' : '';
-      return `<p class="msg-${m.role}"><span>${escapeHtml(m.content)}</span>${m.role === 'assistant' ? searchTag : ''}</p>`;
+      const time = formatTime(new Date(m.createdAt || Date.now()));
+      const searchChip = m.usedWebSearch ? `<div class="search-chip">🔎 Searched the web</div>` : '';
+      if (m.role === 'user') {
+        return `<div class="msg-row msg-user">
+          <span class="bubble">${escapeHtml(m.content)}</span>
+          <div class="msg-meta">${time}</div>
+        </div>`;
+      }
+      return `<div class="msg-row msg-assistant">
+        ${searchChip}
+        <div class="msg-text">${escapeHtml(m.content)}</div>
+        <div class="msg-meta">${time}</div>
+      </div>`;
     }
 
     function escapeHtml(s) {
@@ -142,11 +162,11 @@
     }
 
     function appendEmptyAssistantMessage() {
-      const p = document.createElement('p');
-      p.className = 'msg-assistant';
-      p.innerHTML = '<span></span>';
-      document.getElementById('history').appendChild(p);
-      return p.querySelector('span');
+      const row = document.createElement('div');
+      row.className = 'msg-row msg-assistant';
+      row.innerHTML = '<div class="msg-text"></div><div class="msg-meta">just now</div>';
+      document.getElementById('history').appendChild(row);
+      return row.querySelector('.msg-text');
     }
 
     // Reads the NDJSON stream from POST /api/chat/messages (see chat.routes.ts):
@@ -213,7 +233,7 @@
           history.scrollTop = 1e9;
         });
         if (result?.usedWebSearch && assistantSpan) {
-          assistantSpan.insertAdjacentHTML('afterend', ' <span class="search-tag">🔎 used web search</span>');
+          assistantSpan.insertAdjacentHTML('beforebegin', '<div class="search-chip">🔎 Searched the web</div>');
         }
         document.getElementById('usage-banner').innerHTML = result?.warn
           ? '<div class="alert alert-warn">⚠️ Your department is near its monthly budget (80%+).</div>'

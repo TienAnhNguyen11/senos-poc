@@ -10,6 +10,15 @@ import { HttpError } from '../errors/HttpError';
 
 const anthropic = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
 
+// Replaying the full conversation on every turn (required — the Messages API is
+// stateless) means cost and latency both grow with conversation length. Two
+// independent mitigations: cap how much history we resend at all, and mark the
+// tail of what we do resend as a prompt-cache breakpoint so unchanged history
+// is billed once (cache read) instead of at full input-token price on every
+// subsequent turn — same mechanism real chat products (and Claude Code itself)
+// use for exactly this problem.
+const MAX_HISTORY_MESSAGES = 20;
+
 async function getOrCreateConversation(userId: string) {
   const existing = await Conversation.findOne({ userId });
   if (existing) return existing;
@@ -44,15 +53,21 @@ export async function streamMessage(
 
   const tenant = await Tenant.findById(ctx.tenantId);
   const conversation = await getOrCreateConversation(ctx.userId);
-  const history = await Message.find({ conversationId: conversation._id }).sort({ createdAt: 1 });
+  const recentHistory = await Message.find({ conversationId: conversation._id })
+    .sort({ createdAt: -1 })
+    .limit(MAX_HISTORY_MESSAGES);
+  const history = recentHistory.reverse(); // back to chronological order
+
+  const historyParams: Anthropic.MessageParam[] = history.map((m, i) =>
+    i === history.length - 1
+      ? { role: m.role, content: [{ type: 'text', text: m.content, cache_control: { type: 'ephemeral' } }] }
+      : { role: m.role, content: m.content }
+  );
 
   const stream = anthropic.messages.stream({
     model: 'claude-sonnet-5',
     max_tokens: 1024,
-    messages: [
-      ...history.map((m) => ({ role: m.role, content: m.content })),
-      { role: 'user' as const, content },
-    ],
+    messages: [...historyParams, { role: 'user' as const, content }],
     tools: tenant?.webSearchEnabled ? [{ type: 'web_search_20260318', name: 'web_search' }] : undefined,
   });
 

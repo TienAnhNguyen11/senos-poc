@@ -47,11 +47,6 @@
                 <option value="10000">10,000 / month</option>
                 <option value="20000">20,000 / month</option>
               </select>
-              <small class="hint">Takes effect immediately — when your team hits this limit, chat pauses until next month.</small>
-            </label>
-            <label>
-              <input type="checkbox" id="web-search-toggle" />
-              Web search enabled
             </label>
           </div>
         </details>
@@ -59,37 +54,66 @@
       </section>
 
       <section class="card">
+        <h3>Features</h3>
+        <p class="hint">Tools your team can use in chat.</p>
+        <label>
+          <input type="checkbox" id="web-search-toggle" />
+          Web search
+        </label>
+      </section>
+
+      <section class="card">
         <h3>Departments</h3>
-        <p class="hint">Each department shares one request pool for the month — first come, first served.</p>
+        <p class="hint">Each department shares one request pool for the month - first come, first served.</p>
+        <div class="filter-bar">
+          <input type="search" id="dept-filter" placeholder="Filter by name..." />
+        </div>
         <table id="departments-table">
-          <thead><tr><th>Name</th><th>Budget/mo</th><th>Used this month</th></tr></thead>
+          <thead><tr><th>Name</th><th>Budget/mo</th><th>Used this month</th><th></th></tr></thead>
           <tbody></tbody>
         </table>
-        <form id="dept-form" class="grid">
-          <input type="text" id="dept-name" placeholder="Department name" required />
-          <input type="number" id="dept-budget" placeholder="Monthly budget (requests)" required min="1" />
-          <button type="submit">Add department</button>
-        </form>
+        <details>
+          <summary>+ Add department</summary>
+          <form id="dept-form" class="grid" style="margin-top:1rem;">
+            <input type="text" id="dept-name" placeholder="Department name" required />
+            <input type="number" id="dept-budget" placeholder="Monthly budget (requests)" required min="1" />
+            <button type="submit">Add department</button>
+          </form>
+        </details>
       </section>
 
       <section class="card">
         <h3>Users</h3>
         <p class="hint">Admins are not budget-limited; only "user" role counts against a department's pool.</p>
+        <div class="filter-bar">
+          <select id="user-dept-filter">
+            <option value="">All departments</option>
+          </select>
+        </div>
         <table id="users-table">
-          <thead><tr><th>Email</th><th>Role</th><th>Department</th><th>Messages this month</th></tr></thead>
+          <thead><tr><th>Email</th><th>Role</th><th>Department</th><th>Messages this month</th><th></th></tr></thead>
           <tbody></tbody>
         </table>
       </section>
 
       <section class="card">
-        <h3>Invite a user</h3>
-        <p class="hint">No email is sent — copy the link and share it yourself.</p>
-        <form id="invite-form" class="grid">
-          <input type="email" id="invite-email" placeholder="Email" required />
-          <select id="invite-department" required></select>
-          <button type="submit">Create invite</button>
-        </form>
-        <div id="invite-result"></div>
+        <h3>Invitations</h3>
+        <p class="hint">No email is sent - copy the link and share it yourself.</p>
+        <table id="invites-table">
+          <thead><tr><th>Email</th><th>Department</th><th>Status</th><th>Expires</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <details>
+          <summary>+ Invite a user</summary>
+          <form id="invite-form" class="grid" style="margin-top:1rem;">
+            <input type="email" id="invite-email" placeholder="Email" required />
+            <select id="invite-department" required>
+              <option value="" disabled selected>Department</option>
+            </select>
+            <button type="submit">Create invite</button>
+          </form>
+          <div id="invite-result"></div>
+        </details>
       </section>
     </div>
   </main>
@@ -142,8 +166,50 @@
     let tenantCache = null;
 
     async function loadAll() {
-      await Promise.all([loadTenant(), loadDepartments(), loadUsers()]);
+      await Promise.all([loadTenant(), loadDepartments(), loadUsers(), loadInvites()]);
       renderTenantUsage();
+    }
+
+    function inviteLink(token) {
+      return `${location.origin}/chat.html?invite=${token}`;
+    }
+
+    async function loadInvites() {
+      const invites = await api('/admin/invites');
+      const tbody = document.querySelector('#invites-table tbody');
+      tbody.innerHTML = invites
+        .map((inv) => {
+          const dept = departmentsCache.find((d) => d._id === inv.departmentId);
+          const expired = new Date(inv.expiresAt) < new Date();
+          const statusLabel = inv.status === 'accepted' ? 'accepted' : expired ? 'expired' : 'pending';
+          const canCopy = statusLabel === 'pending';
+          const actions = canCopy
+            ? `<button type="button" class="btn-sm copy-invite-btn" data-link="${inviteLink(inv.token)}">Copy link</button>
+               <button type="button" class="btn-sm btn-danger revoke-invite-btn" data-id="${inv._id}">Revoke</button>`
+            : '';
+          return `<tr>
+            <td>${inv.email}</td>
+            <td>${dept ? dept.name : '-'}</td>
+            <td><span class="badge badge-user">${statusLabel}</span></td>
+            <td>${new Date(inv.expiresAt).toLocaleDateString()}</td>
+            <td>${actions}</td>
+          </tr>`;
+        })
+        .join('');
+
+      tbody.querySelectorAll('.copy-invite-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          navigator.clipboard.writeText(btn.dataset.link);
+          btn.textContent = 'Copied!';
+        });
+      });
+      tbody.querySelectorAll('.revoke-invite-btn').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Revoke this invite? The link will stop working.')) return;
+          await api(`/admin/invites/${btn.dataset.id}`, { method: 'DELETE' });
+          await loadInvites();
+        });
+      });
     }
 
     async function loadTenant() {
@@ -175,28 +241,126 @@
 
     async function loadDepartments() {
       departmentsCache = await api('/admin/departments');
-      const tbody = document.querySelector('#departments-table tbody');
-      tbody.innerHTML = departmentsCache
-        .map((d) => `<tr><td>${d.name}</td><td>${d.monthlyBudget}</td><td>${usageBarHtml(d.usage.count, d.monthlyBudget)}</td></tr>`)
-        .join('');
+      renderDepartmentsTable();
 
       const deptSelect = document.getElementById('invite-department');
-      deptSelect.innerHTML = departmentsCache
-        .map((d) => `<option value="${d._id}">${d.name}</option>`)
-        .join('');
+      deptSelect.innerHTML =
+        '<option value="" disabled selected>Department</option>' +
+        departmentsCache.map((d) => `<option value="${d._id}">${d.name}</option>`).join('');
+
+      const userFilterSelect = document.getElementById('user-dept-filter');
+      const currentFilter = userFilterSelect.value;
+      userFilterSelect.innerHTML =
+        '<option value="">All departments</option>' +
+        departmentsCache.map((d) => `<option value="${d._id}">${d.name}</option>`).join('');
+      userFilterSelect.value = currentFilter;
     }
 
-    async function loadUsers() {
-      const [users, usage] = await Promise.all([api('/admin/users'), api('/admin/usage')]);
-      const countByUser = Object.fromEntries(usage.byUser.map((u) => [u._id, u.count]));
-      const tbody = document.querySelector('#users-table tbody');
-      tbody.innerHTML = users
-        .map((u) => {
-          const dept = departmentsCache.find((d) => d._id === u.departmentId);
-          return `<tr><td>${u.email}</td><td><span class="badge badge-${u.role}">${u.role}</span></td><td>${dept ? dept.name : '—'}</td><td>${countByUser[u._id] ?? 0}</td></tr>`;
+    let editingDeptId = null;
+
+    function renderDepartmentsTable() {
+      const filter = document.getElementById('dept-filter').value.trim().toLowerCase();
+      const rows = departmentsCache.filter((d) => d.name.toLowerCase().includes(filter));
+      document.querySelector('#departments-table tbody').innerHTML = rows
+        .map((d) => {
+          if (d._id === editingDeptId) {
+            return `<tr>
+              <td><input type="text" class="dept-edit-name" value="${d.name}" /></td>
+              <td><input type="number" class="dept-edit-budget" value="${d.monthlyBudget}" min="1" style="width:6rem;" /></td>
+              <td>${usageBarHtml(d.usage.count, d.monthlyBudget)}</td>
+              <td>
+                <button type="button" class="btn-sm dept-save-btn" data-id="${d._id}">Save</button>
+                <button type="button" class="btn-sm secondary dept-cancel-btn">Cancel</button>
+              </td>
+            </tr>`;
+          }
+          return `<tr>
+            <td>${d.name}</td>
+            <td>${d.monthlyBudget}</td>
+            <td>${usageBarHtml(d.usage.count, d.monthlyBudget)}</td>
+            <td><button type="button" class="btn-sm secondary dept-edit-btn" data-id="${d._id}">Edit</button></td>
+          </tr>`;
         })
         .join('');
     }
+
+    document.getElementById('dept-filter').addEventListener('input', renderDepartmentsTable);
+
+    document.querySelector('#departments-table tbody').addEventListener('click', async (e) => {
+      const editBtn = e.target.closest('.dept-edit-btn');
+      const cancelBtn = e.target.closest('.dept-cancel-btn');
+      const saveBtn = e.target.closest('.dept-save-btn');
+
+      if (editBtn) {
+        editingDeptId = editBtn.dataset.id;
+        renderDepartmentsTable();
+      } else if (cancelBtn) {
+        editingDeptId = null;
+        renderDepartmentsTable();
+      } else if (saveBtn) {
+        const row = saveBtn.closest('tr');
+        const name = row.querySelector('.dept-edit-name').value;
+        const monthlyBudget = Number(row.querySelector('.dept-edit-budget').value);
+        await api(`/admin/departments/${saveBtn.dataset.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ name, monthlyBudget }),
+        });
+        editingDeptId = null;
+        await loadDepartments();
+        renderTenantUsage();
+      }
+    });
+
+    let usersCache = [];
+    let usageByUserCache = {};
+
+    async function loadUsers() {
+      const [users, usage] = await Promise.all([api('/admin/users'), api('/admin/usage')]);
+      usersCache = users;
+      usageByUserCache = Object.fromEntries(usage.byUser.map((u) => [u._id, u.count]));
+      renderUsersTable();
+    }
+
+    function getMyUserId() {
+      const token = localStorage.getItem('senos_token');
+      try {
+        return JSON.parse(atob(token.split('.')[1])).userId;
+      } catch {
+        return null;
+      }
+    }
+
+    function renderUsersTable() {
+      const filterDeptId = document.getElementById('user-dept-filter').value;
+      const rows = filterDeptId ? usersCache.filter((u) => u.departmentId === filterDeptId) : usersCache;
+      const myId = getMyUserId();
+      document.querySelector('#users-table tbody').innerHTML = rows
+        .map((u) => {
+          const dept = departmentsCache.find((d) => d._id === u.departmentId);
+          const removeBtn =
+            u._id === myId
+              ? ''
+              : `<button type="button" class="btn-sm btn-danger user-remove-btn" data-id="${u._id}">Remove</button>`;
+          return `<tr>
+            <td>${u.email}</td>
+            <td><span class="badge badge-${u.role}">${u.role}</span></td>
+            <td>${dept ? dept.name : '-'}</td>
+            <td>${usageByUserCache[u._id] ?? 0}</td>
+            <td>${removeBtn}</td>
+          </tr>`;
+        })
+        .join('');
+    }
+
+    document.getElementById('user-dept-filter').addEventListener('change', renderUsersTable);
+
+    document.querySelector('#users-table tbody').addEventListener('click', async (e) => {
+      const btn = e.target.closest('.user-remove-btn');
+      if (!btn) return;
+      if (!confirm('Remove this user? They will no longer be able to log in.')) return;
+      await api(`/admin/users/${btn.dataset.id}`, { method: 'DELETE' });
+      await loadUsers();
+    });
 
     document.getElementById('tenant-budget').addEventListener('change', async (e) => {
       const newBudget = Number(e.target.value);
@@ -234,16 +398,18 @@
       const email = document.getElementById('invite-email').value;
       const departmentId = document.getElementById('invite-department').value;
       const { link } = await api('/admin/invites', { method: 'POST', body: JSON.stringify({ email, departmentId }) });
+      e.target.reset();
+      await loadInvites();
       document.getElementById('invite-result').innerHTML = `
         <div class="invite-result">
+          <span>✓ Invite created —</span>
           <code>${link}</code>
-          <button type="button" id="copy-invite-link">Copy</button>
+          <button type="button" class="btn-sm" id="copy-invite-link">Copy</button>
         </div>`;
       document.getElementById('copy-invite-link').addEventListener('click', (evt) => {
         navigator.clipboard.writeText(link);
         evt.target.textContent = 'Copied!';
       });
-      e.target.reset();
     });
   </script>
 </body>

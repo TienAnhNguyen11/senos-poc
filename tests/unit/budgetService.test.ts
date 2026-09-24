@@ -72,6 +72,35 @@ describe('setTenantBudget — admission control', () => {
     const updatedAllocation = await PlatformAllocation.findById('platform');
     expect(updatedAllocation!.totalAllocated).toBe(85000); // 100000 - 15000
   });
+
+  // A real concurrency test, not a simulation: MongoDB (including the in-memory
+  // server used here) genuinely processes these findOneAndUpdate calls with
+  // per-document atomicity. Firing them together via Promise.all lets Node
+  // interleave their I/O the same way concurrent HTTP requests would, so this
+  // exercises the exact race the old aggregate-sum-then-update version was
+  // vulnerable to: two admins raising two different tenants' budgets at the
+  // same moment, both reading "still under cap" before either write lands.
+  it('under real concurrent requests, never lets the combined total exceed capacity', async () => {
+    // 85000 already committed; three tenants concurrently try to add 15000
+    // each. Only one can fit (85000 + 15000 = 100000, exactly at cap) — the
+    // other two must be rejected, even though all three raced to check at once.
+    await PlatformAllocation.create({ _id: 'platform', totalAllocated: 85000 });
+    const tenants = await Promise.all(
+      [0, 1, 2].map((i) => Tenant.create({ name: `Racer${i}`, monthlyBudget: 5000 }))
+    );
+
+    const results = await Promise.allSettled(
+      tenants.map((t) => setTenantBudget(String(t._id), 20000)) // delta = 15000 each
+    );
+
+    const succeeded = results.filter((r) => r.status === 'fulfilled');
+    const failed = results.filter((r) => r.status === 'rejected');
+    expect(succeeded).toHaveLength(1);
+    expect(failed).toHaveLength(2);
+
+    const allocation = await PlatformAllocation.findById('platform');
+    expect(allocation!.totalAllocated).toBe(100000); // exactly the one that fit, never more
+  });
 });
 
 describe('checkAndIncrementBudget — atomic pool check', () => {
