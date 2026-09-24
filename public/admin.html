@@ -162,6 +162,33 @@
       location.reload();
     });
 
+    // One kebab-menu trigger per row, listing that row's actions — instead of
+    // several small buttons crammed into one cell (each fighting Pico's default
+    // button sizing individually). Existing action classes (.dept-edit-btn,
+    // .user-remove-btn, etc.) are kept as-is inside the menu items, so the
+    // delegated click handlers below needed no changes.
+    function rowMenu(itemsHtml) {
+      return `<div class="row-menu">
+        <button type="button" class="row-menu-trigger" aria-label="Actions" aria-haspopup="true">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+            <circle cx="12" cy="5" r="1.6"></circle><circle cx="12" cy="12" r="1.6"></circle><circle cx="12" cy="19" r="1.6"></circle>
+          </svg>
+        </button>
+        <div class="row-menu-list" hidden>${itemsHtml}</div>
+      </div>`;
+    }
+
+    // Single delegated listener for every row-menu on the page: opens the
+    // clicked trigger's list and closes all others, or closes everything on
+    // any other click (including picking a menu item, which is the desired
+    // behavior after an action is chosen).
+    document.addEventListener('click', (e) => {
+      const trigger = e.target.closest('.row-menu-trigger');
+      document.querySelectorAll('.row-menu-list').forEach((list) => {
+        list.hidden = !(trigger && list === trigger.nextElementSibling && list.hidden);
+      });
+    });
+
     let departmentsCache = [];
     let tenantCache = null;
 
@@ -184,8 +211,10 @@
           const statusLabel = inv.status === 'accepted' ? 'accepted' : expired ? 'expired' : 'pending';
           const canCopy = statusLabel === 'pending';
           const actions = canCopy
-            ? `<button type="button" class="btn-sm copy-invite-btn" data-link="${inviteLink(inv.token)}">Copy link</button>
-               <button type="button" class="btn-sm btn-danger revoke-invite-btn" data-id="${inv._id}">Revoke</button>`
+            ? rowMenu(
+                `<button type="button" class="row-menu-item copy-invite-btn" data-link="${inviteLink(inv.token)}">Copy link</button>
+                 <button type="button" class="row-menu-item danger revoke-invite-btn" data-id="${inv._id}">Revoke</button>`
+              )
             : '';
           return `<tr>
             <td>${inv.email}</td>
@@ -278,7 +307,7 @@
             <td>${d.name}</td>
             <td>${d.monthlyBudget}</td>
             <td>${usageBarHtml(d.usage.count, d.monthlyBudget)}</td>
-            <td><button type="button" class="btn-sm secondary dept-edit-btn" data-id="${d._id}">Edit</button></td>
+            <td>${rowMenu(`<button type="button" class="row-menu-item dept-edit-btn" data-id="${d._id}">Edit</button>`)}</td>
           </tr>`;
         })
         .join('');
@@ -294,6 +323,7 @@
       if (editBtn) {
         editingDeptId = editBtn.dataset.id;
         renderDepartmentsTable();
+        document.querySelector('.dept-edit-name')?.focus();
       } else if (cancelBtn) {
         editingDeptId = null;
         renderDepartmentsTable();
@@ -340,7 +370,7 @@
           const removeBtn =
             u._id === myId
               ? ''
-              : `<button type="button" class="btn-sm btn-danger user-remove-btn" data-id="${u._id}">Remove</button>`;
+              : rowMenu(`<button type="button" class="row-menu-item danger user-remove-btn" data-id="${u._id}">Remove</button>`);
           return `<tr>
             <td>${u.email}</td>
             <td><span class="badge badge-${u.role}">${u.role}</span></td>

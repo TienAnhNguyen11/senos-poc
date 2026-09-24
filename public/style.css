@@ -98,23 +98,88 @@ table tbody tr:hover {
 
 /* ---------- Small / row-level action buttons ---------- */
 /* Pico's default <button> is sized for a standalone CTA (full-width, large
-   padding, solid primary fill) — wrong for a dense action inside a table cell. */
-.btn-sm {
+   padding, solid primary fill) — wrong for a dense action inside a table cell.
+   Selector is `button.btn-sm` (0,1,1), not `.btn-sm` alone (0,1,0): Pico's own
+   `[type=button]{padding:...}` is also (0,1,0), and that tie did NOT resolve in
+   our favor despite style.css loading after pico.min.css — same class of bug as
+   the .send-btn oval, fixed the same way, by out-specificitying it outright
+   instead of relying on source order. */
+button.btn-sm {
   width: auto;
   display: inline-block;
   padding: 0.3rem 0.75rem;
   font-size: 0.8rem;
   margin: 0;
 }
-.btn-danger {
+button.btn-danger {
   background: transparent;
   border-color: var(--senos-danger);
   color: var(--senos-danger);
 }
-.btn-danger:hover,
-.btn-danger:focus {
+button.btn-danger:hover,
+button.btn-danger:focus {
   background: color-mix(in srgb, var(--senos-danger) 12%, transparent);
   border-color: var(--senos-danger);
+  color: var(--senos-danger);
+}
+
+/* ---------- Row action menu (kebab trigger + dropdown) ---------- */
+/* One "⋮" trigger per table row instead of several small buttons crammed into
+   one cell — only one control to size correctly, reused across every table.
+   Selectors are scoped under `.row-menu` (0,2,0 / 0,2,1) rather than bare
+   `.row-menu-trigger`/`.row-menu-item` (0,1,0), which would tie with Pico's own
+   `[type=button]{...}` (0,1,0) — a tie that, empirically, did not resolve in our
+   favor for .btn-sm above despite this stylesheet loading after Pico's. */
+.row-menu {
+  position: relative;
+  display: inline-block;
+}
+.row-menu .row-menu-trigger {
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  color: var(--pico-muted-color);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+}
+.row-menu .row-menu-trigger:hover {
+  background: var(--pico-code-background-color);
+  color: var(--pico-color);
+}
+.row-menu .row-menu-list {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 0.25rem;
+  z-index: 20;
+  min-width: 140px;
+  padding: 0.3rem;
+  background: var(--pico-card-background-color);
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+.row-menu .row-menu-list button.row-menu-item {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  border: none;
+  background: transparent;
+  color: var(--pico-color);
+  font-size: 0.85rem;
+  text-align: left;
+  border-radius: 4px;
+}
+.row-menu .row-menu-list button.row-menu-item:hover {
+  background: var(--pico-code-background-color);
+}
+.row-menu .row-menu-list button.row-menu-item.danger {
   color: var(--senos-danger);
 }
 

@@ -70,6 +70,10 @@ Run tests: `npm test` (unit: tenant isolation + budget logic; e2e: cross-tenant 
 
 - **Admin is not budget-limited.** Admin is the account owner; this PoC doesn't handle
   an admin abusing their own unlimited access.
+- **A department's budget isn't capped against the tenant's total.** The intent
+  (`take-home-assumptions.md`, "Budget") was that department budgets should sum to at
+  most the tenant's budget — `POST/PATCH /admin/departments` never enforces it, so an
+  admin can create departments that add up to more than the tenant is allocated.
 - **Usage tracking doesn't distinguish web-search requests from plain ones**, even
   though a search-triggering request costs more in reality ($10/1000 searches + tokens
   on top). All requests count as 1 unit for budget purposes.
