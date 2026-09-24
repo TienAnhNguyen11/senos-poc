@@ -167,6 +167,74 @@ describe('streamMessage — history sent to Claude', () => {
     expect(params.messages[20]).toEqual({ role: 'user', content: 'new message' });
   });
 
+  // Regression: insertMany stamps the user message and the assistant reply with the
+  // SAME createdAt, and MongoDB won't order ties stably — so sorting on createdAt
+  // alone returned replies before their own questions, leaving two user messages
+  // adjacent. The API merges adjacent same-role messages, so Claude received the
+  // previous question and the new one as a single turn and answered both.
+  // Note the test above seeds messages 1s apart, which accidentally sidesteps the
+  // tie entirely — that is exactly why it never caught this.
+  it('keeps each turn in question-then-answer order when timestamps collide', async () => {
+    const { tenantId, deptId, userId } = await setupTenant(1000);
+    const conversation = await als.run({ tenantId, userId, role: 'user' }, () => Conversation.create({ userId }));
+
+    // Two completed turns, each written the way insertMany writes them: both
+    // messages of a turn sharing one timestamp.
+    const turns = [
+      { at: new Date('2026-09-24T10:00:00.000Z'), q: 'can penguins fly?', a: 'No, they cannot.' },
+      { at: new Date('2026-09-24T10:00:05.000Z'), q: 'can they swim?', a: 'Yes, they can.' },
+    ];
+    for (const turn of turns) {
+      await als.run({ tenantId, userId, role: 'user' }, async () =>
+        Message.insertMany([
+        {
+          tenantId,
+          conversationId: conversation._id,
+          userId,
+          departmentId: deptId,
+          role: 'user' as const,
+          content: turn.q,
+          usedWebSearch: false,
+          createdAt: turn.at,
+        },
+        {
+          tenantId,
+          conversationId: conversation._id,
+          userId,
+          departmentId: deptId,
+          role: 'assistant' as const,
+          content: turn.a,
+          usedWebSearch: false,
+          createdAt: turn.at,
+        },
+        ])
+      );
+    }
+
+    await als.run({ tenantId, userId, role: 'user' }, () =>
+      streamMessage('do they run faster than a cheetah?', () => {})
+    );
+
+    const [params] = mockStream.mock.calls[0];
+    const textOf = (m: { content: string | Array<{ text: string }> }) =>
+      typeof m.content === 'string' ? m.content : m.content[0].text;
+
+    expect(params.messages.map((m: { role: string }) => m.role)).toEqual([
+      'user',
+      'assistant',
+      'user',
+      'assistant',
+      'user',
+    ]);
+    expect(params.messages.map(textOf)).toEqual([
+      'can penguins fly?',
+      'No, they cannot.',
+      'can they swim?',
+      'Yes, they can.',
+      'do they run faster than a cheetah?',
+    ]);
+  });
+
   it('persists both the user message and the assistant reply after a successful send', async () => {
     const { tenantId, userId } = await setupTenant(1000);
     mockStream.mockReturnValue(fakeAnthropicStream('the answer', 1));
@@ -179,5 +247,26 @@ describe('streamMessage — history sent to Claude', () => {
     expect(saved).toHaveLength(2);
     expect(saved[0]).toMatchObject({ role: 'user', content: 'the question', usedWebSearch: false });
     expect(saved[1]).toMatchObject({ role: 'assistant', content: 'the answer', usedWebSearch: true });
+  });
+
+  // The question is persisted before the provider call, so a failure can't throw it
+  // away — the budget for it was already spent, and silently losing it made the
+  // department's usage counter and the per-user message count disagree for good.
+  it('keeps the user message when the provider call fails', async () => {
+    const { tenantId, userId } = await setupTenant(1000);
+    mockStream.mockReturnValue({
+      on: vi.fn(),
+      finalMessage: vi.fn().mockRejectedValue(new Error('provider exploded')),
+    });
+
+    await als.run({ tenantId, userId, role: 'user' }, async () => {
+      await expect(streamMessage('a question that gets no answer', () => {})).rejects.toThrow(
+        /provider exploded/
+      );
+    });
+
+    const saved = await als.run({ tenantId, userId, role: 'user' }, async () => Message.find());
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({ role: 'user', content: 'a question that gets no answer' });
   });
 });

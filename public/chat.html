@@ -169,6 +169,23 @@ function formatTime(date) {
       return row.querySelector('.msg-text');
     }
 
+    function appendTypingIndicator() {
+      const row = document.createElement('div');
+      row.className = 'msg-row msg-assistant';
+      // aria-busy on each dot is load-bearing, not decoration: under
+      // prefers-reduced-motion, Pico kills every animation with !important except
+      // on [aria-busy=true] — its own carve-out for loading indicators. The
+      // attribute has to be on the animated spans themselves; on the wrapper alone
+      // the spans still match Pico's :not([aria-busy=true]) and freeze.
+      row.innerHTML =
+        '<div class="typing-dots" aria-busy="true" aria-label="Assistant is typing">' +
+        '<span aria-busy="true"></span><span aria-busy="true"></span><span aria-busy="true"></span>' +
+        '</div>';
+      document.getElementById('history').appendChild(row);
+      document.getElementById('history').scrollTop = 1e9;
+      return row;
+    }
+
     // Reads the NDJSON stream from POST /api/chat/messages (see chat.routes.ts):
     // one {"type":"delta","text":...} line per token chunk, then one
     // {"type":"done", reply, usedWebSearch, warn}. onDelta is called as text
@@ -226,9 +243,13 @@ function formatTime(date) {
       input.value = '';
       const history = document.getElementById('history');
       let assistantSpan = null;
+      const typingEl = appendTypingIndicator();
       try {
         const result = await streamChat(content, (delta) => {
-          if (!assistantSpan) assistantSpan = appendEmptyAssistantMessage();
+          if (!assistantSpan) {
+            typingEl.remove();
+            assistantSpan = appendEmptyAssistantMessage();
+          }
           assistantSpan.textContent += delta;
           history.scrollTop = 1e9;
         });
@@ -240,6 +261,7 @@ function formatTime(date) {
           : '';
         loadUsage();
       } catch (err) {
+        typingEl.remove();
         if (err.status === 429) {
           document.getElementById('usage-banner').innerHTML =
             '<div class="alert alert-danger">🚫 Department budget used up for this month — chat blocked.</div>';

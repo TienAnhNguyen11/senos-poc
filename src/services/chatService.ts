@@ -19,6 +19,14 @@ const anthropic = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
 // use for exactly this problem.
 const MAX_HISTORY_MESSAGES = 20;
 
+// Deliberately mild. An earlier, far more aggressive version ("never reference a
+// previous turn under any circumstances") was written to suppress what looked like
+// a recap habit — that turned out to be the message-ordering bug fixed below, not
+// a style problem, so the heavy-handed wording was dropped once the real cause was
+// found. It was forbidding genuinely useful context, for no reason.
+const SYSTEM_PROMPT =
+  'You are a helpful assistant. Answer the current question directly and concisely.';
+
 async function getOrCreateConversation(userId: string) {
   const existing = await Conversation.findOne({ userId });
   if (existing) return existing;
@@ -53,10 +61,35 @@ export async function streamMessage(
 
   const tenant = await Tenant.findById(ctx.tenantId);
   const conversation = await getOrCreateConversation(ctx.userId);
+  // `_id` is the tiebreaker, not decoration: insertMany writes the user message and
+  // the assistant reply with the SAME createdAt (same millisecond), and MongoDB does
+  // not guarantee a stable order for ties — so sorting on createdAt alone returned
+  // the pair in arbitrary order, putting replies before their own questions. That
+  // left two user messages adjacent, which the API merges into one turn, so Claude
+  // answered both the old and the new question at once. ObjectIds increment in
+  // creation order, which makes the intra-millisecond order deterministic.
   const recentHistory = await Message.find({ conversationId: conversation._id })
-    .sort({ createdAt: -1 })
+    .sort({ createdAt: -1, _id: -1 })
     .limit(MAX_HISTORY_MESSAGES);
   const history = recentHistory.reverse(); // back to chronological order
+
+  // Persist the question BEFORE calling the provider. Writing both messages
+  // together after the reply meant a failed/timed-out call silently threw the
+  // user's message away — while the budget for it had already been spent, so the
+  // department counter and the per-user message count drifted apart permanently.
+  // Saving it first also gives the two messages naturally distinct timestamps.
+  // If the call below fails, this message stays unanswered in the transcript and
+  // is carried into the next turn's history, which is the honest representation:
+  // the user did ask it, and it never got an answer.
+  await Message.create({
+    tenantId: ctx.tenantId,
+    conversationId: conversation._id,
+    userId: user._id,
+    departmentId: user.departmentId,
+    role: 'user',
+    content,
+    usedWebSearch: false,
+  });
 
   const historyParams: Anthropic.MessageParam[] = history.map((m, i) =>
     i === history.length - 1
@@ -67,6 +100,7 @@ export async function streamMessage(
   const stream = anthropic.messages.stream({
     model: 'claude-sonnet-5',
     max_tokens: 1024,
+    system: SYSTEM_PROMPT,
     messages: [...historyParams, { role: 'user' as const, content }],
     tools: tenant?.webSearchEnabled ? [{ type: 'web_search_20260318', name: 'web_search' }] : undefined,
   });
@@ -81,26 +115,15 @@ export async function streamMessage(
     .join('\n');
   const usedWebSearch = (finalMessage.usage.server_tool_use?.web_search_requests ?? 0) > 0;
 
-  await Message.insertMany([
-    {
-      tenantId: ctx.tenantId,
-      conversationId: conversation._id,
-      userId: user._id,
-      departmentId: user.departmentId,
-      role: 'user' as const,
-      content,
-      usedWebSearch: false,
-    },
-    {
-      tenantId: ctx.tenantId,
-      conversationId: conversation._id,
-      userId: user._id,
-      departmentId: user.departmentId,
-      role: 'assistant' as const,
-      content: reply,
-      usedWebSearch,
-    },
-  ]);
+  await Message.create({
+    tenantId: ctx.tenantId,
+    conversationId: conversation._id,
+    userId: user._id,
+    departmentId: user.departmentId,
+    role: 'assistant',
+    content: reply,
+    usedWebSearch,
+  });
 
   return { reply, usedWebSearch, warn };
 }
@@ -108,5 +131,7 @@ export async function streamMessage(
 export async function getHistory() {
   const ctx = getTenantContext()!;
   const conversation = await getOrCreateConversation(ctx.userId);
-  return Message.find({ conversationId: conversation._id }).sort({ createdAt: 1 });
+  // Same createdAt tiebreaker as above — without it the rendered transcript can
+  // show a reply above the question that produced it.
+  return Message.find({ conversationId: conversation._id }).sort({ createdAt: 1, _id: 1 });
 }
