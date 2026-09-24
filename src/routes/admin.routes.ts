@@ -57,6 +57,17 @@ adminRouter.post('/invites', async (req, res, next) => {
   }
 });
 
+adminRouter.get('/tenant', async (_req, res, next) => {
+  try {
+    const ctx = getTenantContext()!;
+    const tenant = await Tenant.findById(ctx.tenantId);
+    if (!tenant) throw new HttpError(404, 'Tenant not found');
+    res.json({ monthlyBudget: tenant.monthlyBudget, webSearchEnabled: tenant.webSearchEnabled });
+  } catch (err) {
+    next(err);
+  }
+});
+
 adminRouter.patch('/tenant/budget', async (req, res, next) => {
   try {
     const { monthlyBudget } = req.body;

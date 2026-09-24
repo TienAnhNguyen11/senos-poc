@@ -1,0 +1,204 @@
+/* Shared design layer on top of Pico.css — uses Pico's own CSS variables so it
+   still adapts automatically to light/dark (prefers-color-scheme), no extra work. */
+
+:root {
+  --senos-radius: 12px;
+  --senos-ok: #2fb344;
+  --senos-warn: #d9a406;
+  --senos-danger: #e5484d;
+}
+
+body > main.container {
+  max-width: 980px;
+}
+
+/* ---------- Top nav ---------- */
+nav.senos-nav {
+  position: sticky;
+  top: env(safe-area-inset-top, 0px);
+  z-index: 10;
+  background: var(--pico-background-color);
+  border-bottom: 1px solid var(--pico-muted-border-color);
+  padding-block: 0.85rem;
+  margin-bottom: 2rem;
+}
+nav.senos-nav strong {
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+nav.senos-nav .who {
+  color: var(--pico-muted-color);
+  font-size: 0.875rem;
+}
+
+/* ---------- Auth cards (login / accept-invite) ---------- */
+.auth-card {
+  max-width: 420px;
+  margin: 3rem auto;
+  padding: 2rem;
+  border-radius: var(--senos-radius);
+}
+.auth-card h3 {
+  margin-bottom: 1.25rem;
+}
+
+/* ---------- Section cards ---------- */
+.card {
+  background: var(--pico-card-background-color);
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: var(--senos-radius);
+  padding: 1.5rem 1.75rem;
+  margin-bottom: 1.5rem;
+}
+.card h3 {
+  margin-bottom: 0.25rem;
+}
+.card .hint {
+  color: var(--pico-muted-color);
+  font-size: 0.875rem;
+  margin-bottom: 1.25rem;
+}
+.card table {
+  margin-bottom: 1.25rem;
+}
+.card table:last-child,
+.card form:last-child,
+.card > div:last-child {
+  margin-bottom: 0;
+}
+
+/* ---------- Tables ---------- */
+table thead th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--pico-muted-color);
+  border-bottom-width: 1px;
+}
+table tbody tr:hover {
+  background: var(--pico-code-background-color);
+}
+
+/* ---------- Role badge ---------- */
+.badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  text-transform: capitalize;
+}
+.badge-admin {
+  background: color-mix(in srgb, var(--pico-primary) 18%, transparent);
+  color: var(--pico-primary);
+}
+.badge-user {
+  background: var(--pico-code-background-color);
+  color: var(--pico-muted-color);
+}
+
+/* ---------- Usage progress bar ---------- */
+.usage-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 140px;
+}
+.usage-bar {
+  flex: 1;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--pico-muted-border-color);
+  overflow: hidden;
+}
+.usage-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+.usage-ok { background: var(--senos-ok); }
+.usage-warn { background: var(--senos-warn); }
+.usage-danger { background: var(--senos-danger); }
+.usage-label {
+  font-size: 0.8rem;
+  color: var(--pico-muted-color);
+  white-space: nowrap;
+}
+
+/* ---------- Invite result ---------- */
+.invite-result {
+  margin-top: 1rem;
+  padding: 0.9rem 1rem;
+  background: var(--pico-code-background-color);
+  border-radius: var(--senos-radius);
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.invite-result code {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.invite-result button {
+  width: auto;
+  margin: 0;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.8rem;
+}
+
+/* ---------- Alert banners (chat.html budget warnings) ---------- */
+.alert {
+  padding: 0.8rem 1.1rem;
+  border-radius: var(--senos-radius);
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+.alert-warn {
+  background: color-mix(in srgb, var(--senos-warn) 18%, var(--pico-card-background-color));
+  border: 1px solid color-mix(in srgb, var(--senos-warn) 45%, transparent);
+}
+.alert-danger {
+  background: color-mix(in srgb, var(--senos-danger) 16%, var(--pico-card-background-color));
+  border: 1px solid color-mix(in srgb, var(--senos-danger) 45%, transparent);
+}
+
+/* ---------- Chat ---------- */
+#history {
+  max-height: 62vh;
+  overflow-y: auto;
+  padding: 0.25rem 0.25rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.msg-user,
+.msg-assistant {
+  margin: 0;
+  max-width: 100%;
+}
+.msg-user { text-align: right; }
+.msg-user > span {
+  background: var(--pico-primary);
+  color: var(--pico-primary-inverse);
+  border-radius: 14px 14px 2px 14px;
+  padding: 0.6rem 0.9rem;
+  display: inline-block;
+  max-width: 75%;
+  text-align: left;
+}
+.msg-assistant > span {
+  background: var(--pico-card-background-color);
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: 14px 14px 14px 2px;
+  padding: 0.6rem 0.9rem;
+  display: inline-block;
+  max-width: 75%;
+}
+.search-tag {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--pico-muted-color);
+  margin-top: 0.3rem;
+}

@@ -5,43 +5,39 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SenOS Chat</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css" />
-  <style>
-    #history { max-height: 60vh; overflow-y: auto; }
-    .msg-user { text-align: right; }
-    .msg-user > span { background: var(--pico-primary-background); color: var(--pico-primary-inverse); border-radius: 8px; padding: 0.5rem 0.75rem; display: inline-block; }
-    .msg-assistant > span { background: var(--pico-card-background-color); border-radius: 8px; padding: 0.5rem 0.75rem; display: inline-block; }
-    .search-tag { font-size: 0.75rem; opacity: 0.7; }
-  </style>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <main class="container">
-    <nav>
-      <ul><li><strong>SenOS Chat</strong></li></ul>
-      <ul>
-        <li id="who"></li>
-        <li><a href="admin.html">Admin</a></li>
-        <li><a href="#" id="logout">Log out</a></li>
-      </ul>
-    </nav>
+  <nav class="senos-nav">
+    <div class="container" style="display:flex; align-items:center; justify-content:space-between;">
+      <strong>SenOS Chat</strong>
+      <span style="display:flex; align-items:center; gap:1.25rem;">
+        <span class="who" id="who"></span>
+        <a href="admin.html">Admin</a>
+        <a href="#" id="logout">Log out</a>
+      </span>
+    </div>
+  </nav>
 
-    <article id="accept-card" hidden>
+  <main class="container">
+    <article id="accept-card" class="auth-card" hidden>
       <h3>Set your password</h3>
       <p id="accept-email"></p>
       <form id="accept-form">
         <input type="password" id="accept-password" placeholder="Choose a password" required minlength="6" />
         <button type="submit">Join</button>
       </form>
-      <small id="accept-error" style="color: var(--pico-del-color)"></small>
+      <small id="accept-error" style="color: var(--senos-danger)"></small>
     </article>
 
-    <article id="login-card">
+    <article id="login-card" class="auth-card">
       <h3>Log in</h3>
       <form id="login-form">
         <input type="email" id="email" placeholder="Email" required />
         <input type="password" id="password" placeholder="Password" required />
         <button type="submit">Log in</button>
       </form>
-      <small id="login-error" style="color: var(--pico-del-color)"></small>
+      <small id="login-error" style="color: var(--senos-danger)"></small>
     </article>
 
     <div id="chat-view" hidden>
@@ -51,7 +47,7 @@
         <input type="text" id="content" placeholder="Ask something..." required autocomplete="off" />
         <button type="submit">Send</button>
       </form>
-      <small id="send-error" style="color: var(--pico-del-color)"></small>
+      <small id="send-error" style="color: var(--senos-danger)"></small>
     </div>
   </main>
 
@@ -220,13 +216,13 @@
           assistantSpan.insertAdjacentHTML('afterend', ' <span class="search-tag">🔎 used web search</span>');
         }
         document.getElementById('usage-banner').innerHTML = result?.warn
-          ? '<article style="background: var(--pico-mark-background-color)">⚠️ Your department is near its monthly budget (80%+).</article>'
+          ? '<div class="alert alert-warn">⚠️ Your department is near its monthly budget (80%+).</div>'
           : '';
         loadUsage();
       } catch (err) {
         if (err.status === 429) {
           document.getElementById('usage-banner').innerHTML =
-            '<article style="background: var(--pico-del-color); color: white">🚫 Department budget used up for this month — chat blocked.</article>';
+            '<div class="alert alert-danger">🚫 Department budget used up for this month — chat blocked.</div>';
         } else {
           errorEl.textContent = err.message;
         }
